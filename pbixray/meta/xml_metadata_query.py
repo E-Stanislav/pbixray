@@ -35,6 +35,8 @@ class XmlMetadataQuery:
         self._extract_data_sources()
         self._extract_data_source_view()
         self._extract_tbl_metadata()
+        # Build Power Query (M) table information
+        self._build_m()
         
         self._build_schema()
         self._build_dax_tables()
@@ -289,6 +291,43 @@ class XmlMetadataQuery:
             if hasattr(source.Source, 'ColumnID'):
                 return f"[{source.Source.ColumnID}]"
         return None
+
+    def _build_m(self):
+        """Build the Power Query (M) dataframe similar to the SQL-backed MetadataQuery."""
+        m_data = []
+        for dimension_id, partition in self._partitions.items():
+            if partition and partition.Source:
+                dimension = self._dimensions.get(dimension_id)
+                table_name = dimension.Name if dimension else dimension_id
+                query_definition = self._extract_query_from_source(partition.Source)
+                if query_definition:
+                    m_data.append({
+                        'TableName': table_name,
+                        'Expression': query_definition
+                    })
+        self.m_df = pd.DataFrame(m_data)
+        if not self.m_df.empty and 'Expression' in self.m_df.columns:
+            self.m_df = self.m_df.assign(SqlQuery=self.m_df['Expression'].apply(self._extract_sql_from_expression))
+
+    def _extract_sql_from_expression(self, expr):
+        """Try to pull a SQL statement from an M Expression string (best-effort)."""
+        import re
+        if not expr or not isinstance(expr, str):
+            return ''
+
+        sql_starters = r"(?:SELECT|WITH|SET|INSERT|UPDATE|DELETE|MERGE|CREATE|DROP|ALTER|EXEC|DECLARE)"
+        patterns = [
+            rf"Value\.NativeQuery\([^,]*,\s*(?:\"|\')\s*({sql_starters}[\s\S]+?)\s*(?:\"|\')",
+            rf"Query\s*=\s*(?:\"|\')\s*({sql_starters}[\s\S]+?)\s*(?:\"|\')",
+            rf"Sql\.Database\([^)]*(?:\"|\')\s*({sql_starters}[\s\S]+?)\s*(?:\"|\')",
+            rf"(?:\"|\')\s*({sql_starters}[\s\S]+?)\s*(?:\"|\')"
+        ]
+
+        for pat in patterns:
+            m = re.search(pat, expr, re.IGNORECASE)
+            if m:
+                return m.group(1).strip()
+        return ''
     
     def _build_dax_measures(self):
         measures_data = []

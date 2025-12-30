@@ -1,11 +1,18 @@
+# -*- coding: utf-8 -*-
 import pytest
 import os
 import sys
+from pathlib import Path
+
+# Ensure package is importable from tests
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'pbix')))
 
 from pbixray import PBIXRay
 
-PBIX_FILE_PATH = r"C:\git\hub\pbixray\data\Sales & Returns Sample v201912.pbix"
+# Use repository-relative data file path; skip tests if sample PBIX is not available in the environment
+PBIX_FILE_PATH = str(Path(__file__).resolve().parents[1] / 'data' / 'Sales & Returns Sample v201912.pbix')
+if not Path(PBIX_FILE_PATH).exists():
+    pytest.skip("Sample PBIX not found: tests that require 'data/Sales & Returns Sample v201912.pbix' will be skipped", allow_module_level=True)
 # C:\git\hub\pbixray\data\Excalidraw.pbix
 
 def test_initialization():

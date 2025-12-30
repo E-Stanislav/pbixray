@@ -58,7 +58,36 @@ class MetadataQuery:
         JOIN [Table] t ON t.ID = p.TableID 
         WHERE p.Type = 4;
         """
-        return self.handler.execute_query(sql)
+        df = self.handler.execute_query(sql)
+        # Add a cleaned SQL query column if a SQL statement is embedded in Expression
+        if not df.empty and 'Expression' in df.columns:
+            df = df.assign(SqlQuery=df['Expression'].apply(self.__extract_sql_from_expression))
+        return df
+
+    def __extract_sql_from_expression(self, expr):
+        """Attempt to extract a plain SQL query from a Power Query (M) expression string.
+
+        Looks for common patterns like Value.NativeQuery(..., "SELECT ..."), Query="SELECT ...",
+        Sql.Database(..., "SELECT ...") and falls back to finding a quoted SELECT statement.
+        """
+        import re
+        if not expr or not isinstance(expr, str):
+            return ''
+
+        # Allow SQL to start with a variety of common SQL keywords (SELECT, WITH, SET, etc.)
+        sql_starters = r"(?:SELECT|WITH|SET|INSERT|UPDATE|DELETE|MERGE|CREATE|DROP|ALTER|EXEC|DECLARE)"
+        patterns = [
+            rf"Value\.NativeQuery\([^,]*,\s*(?:\"|\')\s*({sql_starters}[\s\S]+?)\s*(?:\"|\')",
+            rf"Query\s*=\s*(?:\"|\')\s*({sql_starters}[\s\S]+?)\s*(?:\"|\')",
+            rf"Sql\.Database\([^)]*(?:\"|\')\s*({sql_starters}[\s\S]+?)\s*(?:\"|\')",
+            rf"(?:\"|\')\s*({sql_starters}[\s\S]+?)\s*(?:\"|\')"
+        ]
+
+        for pat in patterns:
+            m = re.search(pat, expr, re.IGNORECASE)
+            if m:
+                return m.group(1).strip()
+        return ''
     
     def __populate_m_parameters(self):
         sql = """ 
