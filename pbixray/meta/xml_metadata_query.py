@@ -316,11 +316,12 @@ class XmlMetadataQuery:
             return ''
 
         sql_starters = r"(?:SELECT|WITH|SET|INSERT|UPDATE|DELETE|MERGE|CREATE|DROP|ALTER|EXEC|DECLARE)"
+        # Patterns capture quoted SQL while allowing doubled quotes inside the quoted string
         patterns = [
-            rf"Value\.NativeQuery\([^,]*,\s*(?:\"((?:[^\"]|\"\")*)\"|'((?:[^\']|'' )*)')",
-            rf"Query\s*=\s*(?:\"((?:[^\"]|\"\")*)\"|'((?:[^\']|'' )*)')",
-            rf"Sql\.Database\([^)]*(?:\"((?:[^\"]|\"\")*)\"|'((?:[^\']|'' )*)')",
-            rf"(?:\"((?:[^\"]|\"\")*)\"|'((?:[^\']|'' )*)')"
+            rf"Value\.NativeQuery\([^,]*,\s*(?:\"((?:[^\"]|\"\")*)\"|'((?:[^']|'')*)')",
+            rf"Query\s*=\s*(?:\"((?:[^\"]|\"\")*)\"|'((?:[^']|'')*)')",
+            rf"Sql\.Database\([^)]*(?:\"((?:[^\"]|\"\")*)\"|'((?:[^']|'')*)')",
+            rf"(?:\"((?:[^\"]|\"\")*)\"|'((?:[^']|'')*)')"
         ]
 
         for pat in patterns:
@@ -333,13 +334,40 @@ class XmlMetadataQuery:
                 sql_search = re.search(rf"([\s;]*({sql_starters})\b[\s\S]+)", content, re.IGNORECASE)
                 if sql_search:
                     found_sql = sql_search.group(1).lstrip('\r\n\t ;').strip()
-                    if ';' in found_sql:
-                        first_stmt = found_sql.split(';', 1)[0].strip() + ';'
-                        return first_stmt
-                    return found_sql
+                    return self._truncate_sql_to_first_statement(found_sql)
                 # If we can't find an embedded SQL statement, treat as non-SQL and return empty
                 return ''
         return ''
+
+    def _truncate_sql_to_first_statement(self, sql_text: str) -> str:
+        """Return SQL up to and including the first semicolon that is not inside single or double quotes.
+
+        If no such semicolon is found, return the whole trimmed SQL text.
+        """
+        i = 0
+        n = len(sql_text)
+        in_squote = False
+        in_dquote = False
+        while i < n:
+            ch = sql_text[i]
+            if ch == "'" and not in_dquote:
+                if in_squote and i + 1 < n and sql_text[i + 1] == "'":
+                    i += 2
+                    continue
+                in_squote = not in_squote
+                i += 1
+                continue
+            if ch == '"' and not in_squote:
+                if in_dquote and i + 1 < n and sql_text[i + 1] == '"':
+                    i += 2
+                    continue
+                in_dquote = not in_dquote
+                i += 1
+                continue
+            if ch == ';' and not in_squote and not in_dquote:
+                return sql_text[:i + 1].strip()
+            i += 1
+        return sql_text.strip()
     
     def _build_dax_measures(self):
         measures_data = []

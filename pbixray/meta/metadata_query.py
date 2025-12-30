@@ -77,11 +77,13 @@ class MetadataQuery:
         # Allow SQL to start with a variety of common SQL keywords (SELECT, WITH, SET, etc.)
         sql_starters = r"(?:SELECT|WITH|SET|INSERT|UPDATE|DELETE|MERGE|CREATE|DROP|ALTER|EXEC|DECLARE)"
         # Patterns capture quoted SQL while allowing doubled quotes inside the quoted string
+        # Patterns capture quoted SQL while allowing doubled quotes inside the quoted string
+        # Note: keep single-quote branch as (?:[^']|'')* to properly handle doubled single quotes
         patterns = [
-            rf"Value\.NativeQuery\([^,]*,\s*(?:\"((?:[^\"]|\"\")*)\"|'((?:[^\']|'' )*)')",
-            rf"Query\s*=\s*(?:\"((?:[^\"]|\"\")*)\"|'((?:[^\']|'' )*)')",
-            rf"Sql\.Database\([^)]*(?:\"((?:[^\"]|\"\")*)\"|'((?:[^\']|'' )*)')",
-            rf"(?:\"((?:[^\"]|\"\")*)\"|'((?:[^\']|'' )*)')"
+            rf"Value\.NativeQuery\([^,]*,\s*(?:\"((?:[^\"]|\"\")*)\"|'((?:[^']|'')*)')",
+            rf"Query\s*=\s*(?:\"((?:[^\"]|\"\")*)\"|'((?:[^']|'')*)')",
+            rf"Sql\.Database\([^)]*(?:\"((?:[^\"]|\"\")*)\"|'((?:[^']|'')*)')",
+            rf"(?:\"((?:[^\"]|\"\")*)\"|'((?:[^']|'')*)')"
         ]
 
         for pat in patterns:
@@ -98,11 +100,8 @@ class MetadataQuery:
                 if sql_search:
                     # group 1 contains leading whitespace + full SQL; strip leading whitespace
                     found_sql = sql_search.group(1).lstrip('\r\n\t ;').strip()
-                    # If there are multiple statements or trailing non-SQL text, keep only up to the first semicolon
-                    if ';' in found_sql:
-                        first_stmt = found_sql.split(';', 1)[0].strip() + ';'
-                        return first_stmt
-                    return found_sql
+                    # Truncate to the first semicolon that is not within quotes
+                    return self.__truncate_sql_to_first_statement(found_sql)
                 # If we can't find an embedded SQL statement, treat as non-SQL and return empty
                 return ''
         return ''
@@ -117,6 +116,39 @@ class MetadataQuery:
         FROM Expression;
         """
         return self.handler.execute_query(sql)  
+
+    def __truncate_sql_to_first_statement(self, sql_text: str) -> str:
+        """Return SQL up to and including the first semicolon that is not inside single or double quotes.
+
+        If no such semicolon is found, return the whole trimmed SQL text.
+        """
+        i = 0
+        n = len(sql_text)
+        in_squote = False
+        in_dquote = False
+        while i < n:
+            ch = sql_text[i]
+            if ch == "'" and not in_dquote:
+                # handle doubled single quote escapes inside single-quoted string
+                if in_squote and i + 1 < n and sql_text[i + 1] == "'":
+                    i += 2
+                    continue
+                in_squote = not in_squote
+                i += 1
+                continue
+            if ch == '"' and not in_squote:
+                # handle doubled double quote escapes inside double-quoted identifier/string
+                if in_dquote and i + 1 < n and sql_text[i + 1] == '"':
+                    i += 2
+                    continue
+                in_dquote = not in_dquote
+                i += 1
+                continue
+            if ch == ';' and not in_squote and not in_dquote:
+                # return up to and including semicolon
+                return sql_text[:i + 1].strip()
+            i += 1
+        return sql_text.strip()
 
     def __populate_dax_tables(self):
         sql = """ 
