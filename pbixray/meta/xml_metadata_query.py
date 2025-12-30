@@ -333,7 +333,8 @@ class XmlMetadataQuery:
                 sql_search = re.search(rf"([\s;]*({sql_starters})\b[\s\S]+)", content, re.IGNORECASE)
                 if sql_search:
                     return sql_search.group(1).lstrip('\r\n\t ;').strip()
-                return content.strip()
+                # If we can't find an embedded SQL statement, treat as non-SQL and return empty
+                return ''
         return ''
     
     def _build_dax_measures(self):

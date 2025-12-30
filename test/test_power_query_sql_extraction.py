@@ -18,6 +18,8 @@ class FakeHandler:
                 {'TableName': 'TestTable5', 'Expression': (
                     "let\n    Code = \"\nSELECT DISTINCT \"\"Customer_id\"\" id\nFROM myTable\nWHERE id > 0\"\nin Source"
                 )}
+                ,
+                {'TableName': 'TestTable6', 'Expression': "let Source = Table.SelectRows(d_Em, each [Key] = 1) in Source"}
             ])
         return pd.DataFrame()
 
@@ -37,3 +39,5 @@ def test_sql_extraction_from_expression():
     # Multiline expression starting with newline; expect SELECT DISTINCT and quoted Cyrillic identifier preserved
     assert df.loc[4, 'SqlQuery'].upper().startswith('SELECT DISTINCT'), 'Multiline SQL extraction failed'
     assert '"Customer_id"' in df.loc[4, 'SqlQuery'], 'Doubled-quote identifier extraction failed for Customer_id'
+    # Non-SQL expression should not be treated as SQL
+    assert df.loc[5, 'SqlQuery'] == '', 'Non-SQL expression must not produce SqlQuery'

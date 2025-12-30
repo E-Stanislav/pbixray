@@ -98,7 +98,8 @@ class MetadataQuery:
                 if sql_search:
                     # group 1 contains leading whitespace + full SQL; strip leading whitespace
                     return sql_search.group(1).lstrip('\r\n\t ;').strip()
-                return content.strip()
+                # If we can't find an embedded SQL statement, treat as non-SQL and return empty
+                return ''
         return ''
     
     def __populate_m_parameters(self):
