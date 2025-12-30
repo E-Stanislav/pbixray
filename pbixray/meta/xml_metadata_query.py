@@ -332,7 +332,11 @@ class XmlMetadataQuery:
                 content = content.replace('""', '"').replace("''", "'")
                 sql_search = re.search(rf"([\s;]*({sql_starters})\b[\s\S]+)", content, re.IGNORECASE)
                 if sql_search:
-                    return sql_search.group(1).lstrip('\r\n\t ;').strip()
+                    found_sql = sql_search.group(1).lstrip('\r\n\t ;').strip()
+                    if ';' in found_sql:
+                        first_stmt = found_sql.split(';', 1)[0].strip() + ';'
+                        return first_stmt
+                    return found_sql
                 # If we can't find an embedded SQL statement, treat as non-SQL and return empty
                 return ''
         return ''

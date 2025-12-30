@@ -41,3 +41,19 @@ def test_sql_extraction_from_expression():
     assert '"Customer_id"' in df.loc[4, 'SqlQuery'], 'Doubled-quote identifier extraction failed for Customer_id'
     # Non-SQL expression should not be treated as SQL
     assert df.loc[5, 'SqlQuery'] == '', 'Non-SQL expression must not produce SqlQuery'
+    # SQL followed by trailing text after semicolon — extraction should stop at first semicolon
+    handler2 = FakeHandler()
+    # add a new row simulating trailing text after semicolon
+    handler2.queries = []
+    df2 = pd.DataFrame([
+        {'TableName': 'TestTrailing', 'Expression': "let Source = Value.NativeQuery(Connector, \"SELECT a, b FROM t; RefreshModel()\") in Source"}
+    ])
+    # monkeypatch execute_query to return df2 for the m query
+    def exec_q(sql):
+        return df2 if 'FROM partition' in sql and 'p.Type = 4' in sql else pd.DataFrame()
+    handler2.execute_query = exec_q
+    handler2.close_connection = lambda: None
+    mq2 = __import__('pbixray').meta.metadata_query.MetadataQuery(handler2)
+    df_m2 = mq2.m_df
+    assert df_m2.loc[0, 'SqlQuery'].strip().endswith(';'), 'Extraction should preserve semicolon at end of first statement'
+    assert 'RefreshModel' not in df_m2.loc[0, 'SqlQuery'], 'Trailing text after semicolon should not be included in SqlQuery'
