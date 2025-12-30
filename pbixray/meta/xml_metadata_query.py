@@ -317,16 +317,23 @@ class XmlMetadataQuery:
 
         sql_starters = r"(?:SELECT|WITH|SET|INSERT|UPDATE|DELETE|MERGE|CREATE|DROP|ALTER|EXEC|DECLARE)"
         patterns = [
-            rf"Value\.NativeQuery\([^,]*,\s*(?:\"|\')\s*({sql_starters}[\s\S]+?)\s*(?:\"|\')",
-            rf"Query\s*=\s*(?:\"|\')\s*({sql_starters}[\s\S]+?)\s*(?:\"|\')",
-            rf"Sql\.Database\([^)]*(?:\"|\')\s*({sql_starters}[\s\S]+?)\s*(?:\"|\')",
-            rf"(?:\"|\')\s*({sql_starters}[\s\S]+?)\s*(?:\"|\')"
+            rf"Value\.NativeQuery\([^,]*,\s*(?:\"((?:[^\"]|\"\")*)\"|'((?:[^\']|'' )*)')",
+            rf"Query\s*=\s*(?:\"((?:[^\"]|\"\")*)\"|'((?:[^\']|'' )*)')",
+            rf"Sql\.Database\([^)]*(?:\"((?:[^\"]|\"\")*)\"|'((?:[^\']|'' )*)')",
+            rf"(?:\"((?:[^\"]|\"\")*)\"|'((?:[^\']|'' )*)')"
         ]
 
         for pat in patterns:
             m = re.search(pat, expr, re.IGNORECASE)
             if m:
-                return m.group(1).strip()
+                content = m.group(1) if m.group(1) is not None else m.group(2)
+                if not content:
+                    continue
+                content = content.replace('""', '"').replace("''", "'")
+                sql_search = re.search(rf"([\s;]*({sql_starters})\b[\s\S]+)", content, re.IGNORECASE)
+                if sql_search:
+                    return sql_search.group(1).lstrip('\r\n\t ;').strip()
+                return content.strip()
         return ''
     
     def _build_dax_measures(self):

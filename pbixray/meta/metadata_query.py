@@ -76,17 +76,29 @@ class MetadataQuery:
 
         # Allow SQL to start with a variety of common SQL keywords (SELECT, WITH, SET, etc.)
         sql_starters = r"(?:SELECT|WITH|SET|INSERT|UPDATE|DELETE|MERGE|CREATE|DROP|ALTER|EXEC|DECLARE)"
+        # Patterns capture quoted SQL while allowing doubled quotes inside the quoted string
         patterns = [
-            rf"Value\.NativeQuery\([^,]*,\s*(?:\"|\')\s*({sql_starters}[\s\S]+?)\s*(?:\"|\')",
-            rf"Query\s*=\s*(?:\"|\')\s*({sql_starters}[\s\S]+?)\s*(?:\"|\')",
-            rf"Sql\.Database\([^)]*(?:\"|\')\s*({sql_starters}[\s\S]+?)\s*(?:\"|\')",
-            rf"(?:\"|\')\s*({sql_starters}[\s\S]+?)\s*(?:\"|\')"
+            rf"Value\.NativeQuery\([^,]*,\s*(?:\"((?:[^\"]|\"\")*)\"|'((?:[^\']|'' )*)')",
+            rf"Query\s*=\s*(?:\"((?:[^\"]|\"\")*)\"|'((?:[^\']|'' )*)')",
+            rf"Sql\.Database\([^)]*(?:\"((?:[^\"]|\"\")*)\"|'((?:[^\']|'' )*)')",
+            rf"(?:\"((?:[^\"]|\"\")*)\"|'((?:[^\']|'' )*)')"
         ]
 
         for pat in patterns:
             m = re.search(pat, expr, re.IGNORECASE)
             if m:
-                return m.group(1).strip()
+                # prefer group 1 (double-quoted) else group 2 (single-quoted)
+                content = m.group(1) if m.group(1) is not None else m.group(2)
+                if not content:
+                    continue
+                # Unescape doubled quotes inside the quoted string
+                content = content.replace('""', '"').replace("''", "'")
+                # Try to find a SQL statement inside the content (allowing leading whitespace/newlines)
+                sql_search = re.search(rf"([\s;]*({sql_starters})\b[\s\S]+)", content, re.IGNORECASE)
+                if sql_search:
+                    # group 1 contains leading whitespace + full SQL; strip leading whitespace
+                    return sql_search.group(1).lstrip('\r\n\t ;').strip()
+                return content.strip()
         return ''
     
     def __populate_m_parameters(self):
