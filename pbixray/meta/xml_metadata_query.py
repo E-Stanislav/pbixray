@@ -331,12 +331,139 @@ class XmlMetadataQuery:
                 if not content:
                     continue
                 content = content.replace('""', '"').replace("''", "'")
+                # Prefer truncating at semicolon (keep start as-is)
+                truncated = self._truncate_sql_to_first_statement(content)
+                if ';' in truncated:
+                    return truncated
+
+                # If it starts with a SQL starter, accept it
+                if re.match(rf"^\s*{sql_starters}\b", truncated, re.IGNORECASE):
+                    return truncated
+
                 sql_search = re.search(rf"([\s;]*({sql_starters})\b[\s\S]+)", content, re.IGNORECASE)
                 if sql_search:
                     found_sql = sql_search.group(1).lstrip('\r\n\t ;').strip()
                     return self._truncate_sql_to_first_statement(found_sql)
-                # If we can't find an embedded SQL statement, treat as non-SQL and return empty
+
                 return ''
+        return ''
+
+    def _extract_sql_from_native_concat(self, expr: str) -> str:
+        """Same logic as MetadataQuery.__extract_sql_from_native_concat but for XmlMetadataQuery.
+        """
+        import re
+        i = 0
+        lower = expr.lower()
+        for fn in ('value.nativequery', 'sql.database'):
+            idx = lower.find(fn)
+            if idx == -1:
+                continue
+            p = expr.find('(', idx)
+            if p == -1:
+                continue
+            depth = 0
+            j = p
+            n = len(expr)
+            in_squote = False
+            in_dquote = False
+            while j < n:
+                ch = expr[j]
+                if ch == '"' and not in_squote:
+                    if in_dquote and j + 1 < n and expr[j + 1] == '"':
+                        j += 2
+                        continue
+                    in_dquote = not in_dquote
+                    j += 1
+                    continue
+                if ch == "'" and not in_dquote:
+                    if in_squote and j + 1 < n and expr[j + 1] == "'":
+                        j += 2
+                        continue
+                    in_squote = not in_squote
+                    j += 1
+                    continue
+                if in_squote or in_dquote:
+                    j += 1
+                    continue
+                if ch == '(':
+                    depth += 1
+                elif ch == ')':
+                    depth -= 1
+                    if depth == 0:
+                        break
+                j += 1
+            args_str = expr[p + 1:j] if j < n else expr[p + 1:]
+            # split top-level args by commas
+            args = []
+            cur = []
+            depth = 0
+            in_squote = False
+            in_dquote = False
+            k = 0
+            while k < len(args_str):
+                ch = args_str[k]
+                if ch == '"' and not in_squote:
+                    if in_dquote and k + 1 < len(args_str) and args_str[k + 1] == '"':
+                        cur.append('"')
+                        k += 2
+                        continue
+                    in_dquote = not in_dquote
+                    cur.append(ch)
+                    k += 1
+                    continue
+                if ch == "'" and not in_dquote:
+                    if in_squote and k + 1 < len(args_str) and args_str[k + 1] == "'":
+                        cur.append("'")
+                        k += 2
+                        continue
+                    in_squote = not in_squote
+                    cur.append(ch)
+                    k += 1
+                    continue
+                if in_squote or in_dquote:
+                    cur.append(ch)
+                    k += 1
+                    continue
+                if ch == '(':
+                    depth += 1
+                elif ch == ')':
+                    depth -= 1
+                if ch == ',' and depth == 0:
+                    args.append(''.join(cur).strip())
+                    cur = []
+                else:
+                    cur.append(ch)
+                k += 1
+            if cur:
+                args.append(''.join(cur).strip())
+            if len(args) >= 2:
+                second = args[1]
+                pieces = []
+                for m in re.finditer(r'"((?:[^"]|"")*)"|\'((?:[^\']|\'\')*)\'', second):
+                    piece = m.group(1) if m.group(1) is not None else m.group(2)
+                    if piece is not None:
+                        piece = piece.replace('""', '"').replace("''", "'")
+                        pieces.append(piece)
+                if not pieces:
+                    parts = [p.strip() for p in re.split(r'\s*&\s*', second)]
+                    for seg in parts:
+                        m2 = re.match(r'^(?:"([^"]*(?:""[^"]*)*)"|\'([^\']*(?:''[^\']*)*)\')$', seg)
+                        if m2:
+                            piece = m2.group(1) if m2.group(1) is not None else m2.group(2)
+                            if piece is not None:
+                                piece = piece.replace('""', '"').replace("''", "'")
+                                pieces.append(piece)
+                if pieces:
+                    return ' '.join(pieces)
+        return ''
+        # fallback: try to handle concatenation-based SQL passed into native functions
+        concat_sql = self._extract_sql_from_native_concat(expr)
+        if concat_sql:
+            truncated = self._truncate_sql_to_first_statement(concat_sql)
+            if ';' in truncated:
+                return truncated
+            if re.match(rf"^\s*{sql_starters}\b", truncated, re.IGNORECASE):
+                return truncated
         return ''
 
     def _truncate_sql_to_first_statement(self, sql_text: str) -> str:

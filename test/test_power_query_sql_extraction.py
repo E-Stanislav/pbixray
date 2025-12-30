@@ -98,3 +98,33 @@ def test_sql_extraction_from_expression():
     mq4 = __import__('pbixray').meta.metadata_query.MetadataQuery(handler4)
     df4 = mq4.m_df
     assert "''O''Reilly''" in df4.loc[0, 'SqlQuery'] or "O'Reilly" in df4.loc[0, 'SqlQuery'], 'Doubled single quotes handling failed'
+
+    # If content does not start with SQL but contains a semicolon, take up to the semicolon (start kept as-is)
+    handler5 = FakeHandler()
+    def exec_q4(sql):
+        if 'FROM partition' in sql and 'p.Type = 4' in sql:
+            return pd.DataFrame([
+                {'TableName': 'T5', 'Expression': "let Source = Value.NativeQuery(Connector, \"prefix_without_keyword; REFRESH()\") in Source"}
+            ])
+        return pd.DataFrame()
+    handler5.execute_query = exec_q4
+    handler5.close_connection = lambda: None
+    mq5 = __import__('pbixray').meta.metadata_query.MetadataQuery(handler5)
+    df5 = mq5.m_df
+    assert df5.loc[0, 'SqlQuery'].strip() == 'prefix_without_keyword;', 'Start-as-is semicolon-based extraction failed'
+
+    # Concatenated SQL fragments (M expression joins literals with & and variables) should be reconstructed
+    handler6 = FakeHandler()
+    def exec_q5(sql):
+        if 'FROM partition' in sql and 'p.Type = 4' in sql:
+            return pd.DataFrame([
+                {'TableName': 'Concat', 'Expression': "let Source = Value.NativeQuery(Connector, \"WHERE TRUE\n  AND ks.\"\"Код Региональной Группы\"\" IN ( \" & var_Reg & \" )\nORDER BY КС ASC\n;\") in Source"}
+            ])
+        return pd.DataFrame()
+    handler6.execute_query = exec_q5
+    handler6.close_connection = lambda: None
+    mq6 = __import__('pbixray').meta.metadata_query.MetadataQuery(handler6)
+    df6 = mq6.m_df
+    assert 'IN (' in df6.loc[0, 'SqlQuery'], 'Concatenated IN clause not reconstructed'
+    assert 'ORDER BY КС ASC' in df6.loc[0, 'SqlQuery'], 'ORDER BY lost in concatenated reconstruction'
+    assert df6.loc[0, 'SqlQuery'].strip().endswith(';'), 'Concatenated SQL should end with ;'
